@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
 const path = require('path');
+const bodyParser = require('body-parser'); // Needed to read the input text
 
 const app = express();
 const server = http.createServer(app);
@@ -9,19 +10,20 @@ const io = new Server(server);
 
 // DATA STORAGE
 let userData = {}; 
-let history = []; // Stores past questions
+let history = []; 
+let currentSessionName = "Welcome! Waiting for question..."; // Default Title
 const MAX_SUBMISSIONS = 2; 
 
 app.use(express.static(__dirname));
+app.use(bodyParser.urlencoded({ extended: true })); // Enable reading form data
 
 // --- ROUTES ---
 
 // 1. Participant View
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// 2. Projector View
+// 2. Projector View (Full Screen)
 app.get('/live', (req, res) => {
-    // Basic HTML wrapper for the cloud
     res.send(`
     <!DOCTYPE html>
     <html>
@@ -30,22 +32,23 @@ app.get('/live', (req, res) => {
         <script src="/socket.io/socket.io.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js"></script>
         <style>
-            body { margin: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; background: white; }
-            #cloud-canvas { width: 98vw; height: 95vh; }
+            body { margin: 0; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: white; font-family: sans-serif; }
+            h1 { margin: 10px 0; font-size: 3rem; color: #333; }
+            #cloud-canvas { width: 98vw; height: 85vh; }
         </style>
     </head>
     <body>
+        <h1 id="projector-title">${currentSessionName}</h1>
         <canvas id="cloud-canvas"></canvas>
         <script>
             const socket = io();
             const canvas = document.getElementById('cloud-canvas');
+            const title = document.getElementById('projector-title');
             
-            // Auto-resize canvas
             canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+            canvas.height = window.innerHeight * 0.85;
 
             socket.on('update_cloud', (list) => {
-                // Clear canvas before redraw
                 const ctx = canvas.getContext('2d');
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 
@@ -60,13 +63,18 @@ app.get('/live', (req, res) => {
                     shrinkToFit: true
                 });
             });
+
+            // Update Title on Projector automatically
+            socket.on('session_name', (name) => {
+                title.innerText = name;
+            });
         </script>
     </body>
     </html>
     `);
 });
 
-// 3. Admin Dashboard (Control Panel)
+// 3. Admin Dashboard
 app.get('/admin', (req, res) => {
     res.send(`
     <!DOCTYPE html>
@@ -74,10 +82,11 @@ app.get('/admin', (req, res) => {
     <head>
         <title>Admin Panel</title>
         <style>
-            body { font-family: sans-serif; padding: 30px; max-width: 800px; margin: 0 auto; }
-            .card { border: 1px solid #ccc; padding: 20px; border-radius: 8px; margin-bottom: 20px; background: #f9f9f9; }
-            button { background: #d9534f; color: white; border: none; padding: 10px 20px; cursor: pointer; font-size: 16px; border-radius: 5px; }
-            button:hover { background: #c9302c; }
+            body { font-family: sans-serif; padding: 30px; max-width: 800px; margin: 0 auto; background: #f4f4f9; }
+            .card { border: 1px solid #ccc; padding: 25px; border-radius: 8px; margin-bottom: 20px; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+            input[type="text"] { padding: 10px; width: 70%; font-size: 16px; border: 1px solid #ccc; border-radius: 5px; }
+            button { background: #28a745; color: white; border: none; padding: 10px 20px; cursor: pointer; font-size: 16px; border-radius: 5px; margin-left: 10px; }
+            button:hover { background: #218838; }
             h2 { margin-top: 0; }
         </style>
     </head>
@@ -85,42 +94,49 @@ app.get('/admin', (req, res) => {
         <h1>Admin Control Panel</h1>
         
         <div class="card">
-            <h2>Current Session</h2>
-            <p>Active Participants: <strong>${Object.keys(userData).length}</strong></p>
+            <h2>Start New Session</h2>
+            <p>Current Active Users: <strong>${Object.keys(userData).length}</strong></p>
             <form action="/reset" method="POST">
-                <p>Finished with Question 1? Click below to archive this data and reset everyone's screens for Question 2.</p>
-                <button type="submit">⚠️ Archive & Start Next Question</button>
+                <label><strong>Name of Next Session / Question:</strong></label><br><br>
+                <input type="text" name="sessionName" placeholder="e.g. What is your favorite animal?" required>
+                <button type="submit">Set & Start</button>
             </form>
+            <p style="font-size: 0.9em; color: #666;">(Clicking this archives current data, wipes the screen, and updates the title for everyone)</p>
         </div>
 
         <div class="card">
-            <h2>History (Past Questions)</h2>
-            <pre>${JSON.stringify(history, null, 2)}</pre>
+            <h2>History</h2>
+            <pre style="background: #eee; padding: 10px; overflow: auto; max-height: 300px;">${JSON.stringify(history, null, 2)}</pre>
         </div>
     </body>
     </html>
     `);
 });
 
-// 4. Reset Logic
+// 4. Reset & Rename Logic
 app.post('/reset', (req, res) => {
-    // 1. Archive current data
+    // Archive old data
     if (Object.keys(userData).length > 0) {
         history.push({ 
             timestamp: new Date(), 
+            name: currentSessionName,
             data: userData,
             cloud: getAggregatedCloud()
         });
     }
 
-    // 2. Wipe current data
+    // Set New Name
+    currentSessionName = req.body.sessionName || "New Session";
+    
+    // Wipe Data
     userData = {};
 
-    // 3. Tell all phones (and projector) to reset
-    io.emit('reset_client');
-    io.emit('update_cloud', []); // Clear the projector
+    // Broadcast Changes
+    io.emit('reset_client'); // Reset phones
+    io.emit('session_name', currentSessionName); // Update Titles
+    io.emit('update_cloud', []); // Clear Cloud
 
-    res.redirect('/admin'); // Send admin back to dashboard
+    res.redirect('/admin');
 });
 
 
@@ -138,7 +154,9 @@ function getAggregatedCloud() {
 }
 
 io.on('connection', (socket) => {
+  // Send current state to new connections
   socket.emit('update_cloud', getAggregatedCloud());
+  socket.emit('session_name', currentSessionName); 
 
   socket.on('login', (phoneNumber) => {
     socket.phoneNumber = phoneNumber;
@@ -162,7 +180,6 @@ io.on('connection', (socket) => {
         return;
     }
 
-    // Force Lowercase
     user.words = words.slice(0, 5).map(w => w.toLowerCase());
     user.submitCount += 1;
 
