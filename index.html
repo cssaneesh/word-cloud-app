@@ -7,44 +7,30 @@
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; text-align: center; background-color: #f0f2f5; }
-        
+        body { font-family: 'Segoe UI', sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; text-align: center; background-color: #f0f2f5; }
         input { padding: 12px; margin: 8px 0; width: 90%; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; }
-        
-        /* Highlight input when focused */
-        input:focus { border-color: #007bff; outline: none; }
-
         button { padding: 12px 30px; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 15px; font-size: 16px; width: 100%; font-weight: bold; }
         button:disabled { background: #ccc; cursor: not-allowed; }
-        
         #login-screen, #entry-screen { display: none; background: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         .active { display: block !important; }
-        
         #status-msg { margin-top: 10px; font-weight: bold; color: #d9534f; }
-        #info-msg { color: #555; font-size: 0.9em; margin-bottom: 15px; }
-        
         #cloud-canvas { border: 1px solid #ddd; margin-top: 20px; width: 100%; background: white; border-radius: 10px; }
     </style>
 </head>
 <body>
 
     <div id="login-screen" class="active">
-        <h2>Join the Word Cloud</h2>
-        <p>Enter your phone number to participate.</p>
-        <input type="tel" id="phoneNumber" placeholder="Phone Number">
-        <button onclick="login()">Start</button>
+        <h2>Join the Session</h2>
+        <input type="tel" id="phoneNumber" placeholder="Phone Number / ID">
+        <button onclick="login()">Enter</button>
     </div>
 
     <div id="entry-screen">
-        <h3>Enter up to 5 Words</h3>
-        <p id="info-msg">No spaces or punctuation allowed.</p>
-        
+        <h3>Enter 5 Words</h3>
+        <p style="font-size:0.8rem; color:#666;">Lowercase only. No spaces.</p>
         <div id="inputs-container"></div>
-        
         <p id="status-msg"></p>
-        <button id="submitBtn" onclick="submitWords()">Submit Words</button>
-
-        <h3>Live Results</h3>
+        <button id="submitBtn" onclick="submitWords()">Submit</button>
         <canvas id="cloud-canvas" width="600" height="400"></canvas>
     </div>
 
@@ -55,55 +41,16 @@
 
         function login() {
             const num = document.getElementById('phoneNumber').value.trim();
-            if (!num) return alert("Please enter a number.");
+            if (!num) return alert("Enter an ID");
             myPhoneNumber = num;
             socket.emit('login', myPhoneNumber);
             document.getElementById('login-screen').classList.remove('active');
             document.getElementById('entry-screen').classList.add('active');
         }
 
-        // Helper to enforce "No Space / No Punctuation"
         function cleanInput(e) {
-            // Replace anything that is NOT a letter or number with empty string
             e.target.value = e.target.value.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
         }
-
-        socket.on('load_user_entries', (data) => {
-            const container = document.getElementById('inputs-container');
-            const submitBtn = document.getElementById('submitBtn');
-            const statusMsg = document.getElementById('status-msg');
-
-            // 1. Render Inputs
-            container.innerHTML = '';
-            for (let i = 0; i < 5; i++) {
-                const input = document.createElement('input');
-                input.type = 'text';
-                input.placeholder = `Word ${i + 1}`;
-                input.className = 'word-input';
-                input.value = data.words[i] || '';
-                
-                // Attach the cleaner function
-                input.addEventListener('input', cleanInput);
-
-                // If locked, disable typing
-                if (data.isLocked) input.disabled = true;
-                
-                container.appendChild(input);
-            }
-
-            // 2. Handle Locking Status
-            if (data.isLocked) {
-                submitBtn.disabled = true;
-                submitBtn.innerText = "Submitted (Locked)";
-                statusMsg.innerText = "Thank you! Your entries are locked.";
-                statusMsg.style.color = "green";
-            } else {
-                submitBtn.disabled = false;
-                submitBtn.innerText = data.remaining === 2 ? "Submit Initial Entry" : "Submit Edit (Last Chance!)";
-                statusMsg.innerText = `You have ${data.remaining} submission(s) remaining.`;
-                statusMsg.style.color = "#007bff";
-            }
-        });
 
         function submitWords() {
             const inputs = document.querySelectorAll('.word-input');
@@ -111,19 +58,46 @@
             socket.emit('submit_words', words);
         }
 
-        // Render Cloud on Phone (Small version)
-        socket.on('update_cloud', (list) => {
-            WordCloud(canvas, { 
-                list: list, 
-                gridSize: 8, 
-                weightFactor: 2, 
-                fontFamily: 'Impact, sans-serif', 
-                color: 'random-dark', 
-                backgroundColor: '#ffffff',
-                rotateRatio: 0.5 
-            });
+        socket.on('load_user_entries', (data) => {
+            const container = document.getElementById('inputs-container');
+            const submitBtn = document.getElementById('submitBtn');
+            const statusMsg = document.getElementById('status-msg');
+
+            container.innerHTML = '';
+            for (let i = 0; i < 5; i++) {
+                const input = document.createElement('input');
+                input.className = 'word-input';
+                input.placeholder = `Word ${i + 1}`;
+                input.value = data.words[i] || '';
+                input.addEventListener('input', cleanInput);
+                if (data.isLocked) input.disabled = true;
+                container.appendChild(input);
+            }
+
+            if (data.isLocked) {
+                submitBtn.disabled = true;
+                submitBtn.innerText = "Submitted (Locked)";
+                statusMsg.innerText = "Wait for the next question...";
+                statusMsg.style.color = "green";
+            } else {
+                submitBtn.disabled = false;
+                submitBtn.innerText = "Submit";
+                statusMsg.innerText = `Edits remaining: ${data.remaining}`;
+                statusMsg.style.color = "#007bff";
+            }
         });
-        
+
+        socket.on('update_cloud', (list) => {
+            WordCloud(canvas, { list: list, gridSize: 8, weightFactor: 2, fontFamily: 'Impact', color: 'random-dark', rotateRatio: 0 });
+        });
+
+        // --- NEW RESET LOGIC ---
+        socket.on('reset_client', () => {
+            alert("New Question started! Enter your new words.");
+            // Reload the login info to get a fresh state (empty words, unlocked)
+            socket.emit('login', myPhoneNumber);
+        });
+
         socket.on('error_msg', (msg) => alert(msg));
     </script>
 </body>
