@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Word Cloud</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; text-align: center; background-color: #f9f9f9; }
+        input { padding: 12px; margin: 5px 0; width: 90%; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; }
+        button { padding: 12px 30px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 15px; font-size: 16px; width: 100%; }
+        button:hover { background: #218838; }
+        #login-screen, #entry-screen { display: none; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .active { display: block !important; }
+        #cloud-canvas { border: 1px solid #ddd; margin-top: 20px; width: 100%; background: white; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <div id="login-screen" class="active">
+        <h2>Join the Word Cloud</h2>
+        <p>Enter your phone number (or ID) to start.</p>
+        <input type="tel" id="phoneNumber" placeholder="Your Phone Number">
+        <button onclick="login()">Enter</button>
+    </div>
+
+    <div id="entry-screen">
+        <h3>Enter 5 Words</h3>
+        <div id="inputs-container"></div>
+        <button onclick="submitWords()">Submit to Cloud</button>
+        <h3>Live Result</h3>
+        <canvas id="cloud-canvas" width="600" height="400"></canvas>
+    </div>
+
+    <script>
+        const socket = io();
+        let myPhoneNumber = '';
+        const canvas = document.getElementById('cloud-canvas');
+
+        function login() {
+            const num = document.getElementById('phoneNumber').value.trim();
+            if (!num) return alert("Please enter a number.");
+            myPhoneNumber = num;
+            socket.emit('login', myPhoneNumber);
+            document.getElementById('login-screen').classList.remove('active');
+            document.getElementById('entry-screen').classList.add('active');
+        }
+
+        socket.on('load_user_entries', (words) => {
+            const container = document.getElementById('inputs-container');
+            container.innerHTML = '';
+            for (let i = 0; i < 5; i++) {
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.placeholder = `Word ${i + 1}`;
+                input.className = 'word-input';
+                input.value = words[i] || '';
+                container.appendChild(input);
+            }
+        });
+
+        function submitWords() {
+            const inputs = document.querySelectorAll('.word-input');
+            const words = Array.from(inputs).map(i => i.value.trim()).filter(w => w);
+            socket.emit('submit_words', words);
+        }
+
+        socket.on('update_cloud', (list) => {
+            WordCloud(canvas, { 
+                list: list, 
+                gridSize: 8, 
+                weightFactor: 2, 
+                fontFamily: 'Impact, sans-serif', 
+                color: 'random-dark', 
+                backgroundColor: '#ffffff',
+                rotateRatio: 0.5 
+            });
+        });
+    </script>
+</body>
+</html>
