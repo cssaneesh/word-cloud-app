@@ -65,7 +65,7 @@
         // Helper to enforce "No Space / No Punctuation"
         function cleanInput(e) {
             // Replace anything that is NOT a letter or number with empty string
-            e.target.value = e.target.value.replace(/[^a-zA-Z0-9]/g, '');
+            e.target.value = e.target.value.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
         }
 
         socket.on('load_user_entries', (data) => {
