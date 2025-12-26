@@ -1,51 +1,49 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require("socket.io");
-const path = require('path');
+// ... existing code ...
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+// HIDDEN ADMIN PAGE
+// Go to your-url.com/admin to see the list of phone numbers
+app.get('/admin', (req, res) => {
+  let html = `
+    <html>
+      <head>
+        <title>Admin Dashboard</title>
+        <style>
+          body { font-family: sans-serif; padding: 20px; }
+          table { width: 100%; border-collapse: collapse; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f2f2f2; }
+          tr:nth-child(even) { background-color: #f9f9f9; }
+        </style>
+      </head>
+      <body>
+        <h1>Participant Data</h1>
+        <table>
+          <tr>
+            <th>Phone Number / ID</th>
+            <th>Words Submitted</th>
+          </tr>
+  `;
 
-// Store data in memory (Note: On free servers, this resets if the app 'sleeps')
-let userData = {}; 
+  // Loop through the data and create table rows
+  for (const [phone, words] of Object.entries(userData)) {
+    // specific check to avoid showing empty entries
+    const wordList = words.filter(w => w).join(', '); 
+    if (phone) {
+        html += `
+          <tr>
+            <td>${phone}</td>
+            <td>${wordList || '<em>No words yet</em>'}</td>
+          </tr>`;
+    }
+  }
 
-app.use(express.static(__dirname));
-
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  html += `
+        </table>
+      </body>
+    </html>
+  `;
+  
+  res.send(html);
 });
 
-function getAggregatedCloud() {
-  const frequency = {};
-  Object.values(userData).forEach(words => {
-    words.forEach(word => {
-      const w = word.toLowerCase().trim();
-      if (w) frequency[w] = (frequency[w] || 0) + 1;
-    });
-  });
-  // Format for wordcloud2.js
-  return Object.entries(frequency).map(([text, count]) => [text, 20 + (count * 10)]);
-}
-
-io.on('connection', (socket) => {
-  // Send existing cloud to new user
-  socket.emit('update_cloud', getAggregatedCloud());
-
-  socket.on('login', (phoneNumber) => {
-    socket.phoneNumber = phoneNumber;
-    const existingWords = userData[phoneNumber] || ['', '', '', '', ''];
-    socket.emit('load_user_entries', existingWords);
-  });
-
-  socket.on('submit_words', (words) => {
-    if (!socket.phoneNumber) return;
-    userData[socket.phoneNumber] = words.slice(0, 5);
-    io.emit('update_cloud', getAggregatedCloud());
-  });
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// ... server.listen code ...
