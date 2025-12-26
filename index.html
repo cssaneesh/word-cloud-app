@@ -15,19 +15,23 @@
         .active { display: block !important; }
         #status-msg { margin-top: 10px; font-weight: bold; color: #d9534f; }
         #cloud-canvas { border: 1px solid #ddd; margin-top: 20px; width: 100%; background: white; border-radius: 10px; }
+        
+        /* NEW: Style for the Session Name */
+        #session-title { color: #333; margin-bottom: 5px; text-transform: capitalize; }
     </style>
 </head>
 <body>
 
     <div id="login-screen" class="active">
-        <h2>Join the Session</h2>
+        <h2 id="login-title">Join the Session</h2>
         <input type="tel" id="phoneNumber" placeholder="Phone Number / ID">
         <button onclick="login()">Enter</button>
     </div>
 
     <div id="entry-screen">
-        <h3>Enter 5 Words</h3>
-        <p style="font-size:0.8rem; color:#666;">Lowercase only. No spaces.</p>
+        <h2 id="session-title">Waiting...</h2>
+        
+        <p style="font-size:0.8rem; color:#666; margin-top:0;">Enter up to 5 words (Lowercase only)</p>
         <div id="inputs-container"></div>
         <p id="status-msg"></p>
         <button id="submitBtn" onclick="submitWords()">Submit</button>
@@ -91,10 +95,15 @@
             WordCloud(canvas, { list: list, gridSize: 8, weightFactor: 2, fontFamily: 'Impact', color: 'random-dark', rotateRatio: 0 });
         });
 
-        // --- NEW RESET LOGIC ---
+        // NEW: Update the name of the session dynamically
+        socket.on('session_name', (name) => {
+            document.getElementById('session-title').innerText = name;
+            // Also update the login screen title just for fun
+            document.getElementById('login-title').innerText = "Join: " + name;
+        });
+
         socket.on('reset_client', () => {
-            alert("New Question started! Enter your new words.");
-            // Reload the login info to get a fresh state (empty words, unlocked)
+            // Reload the login info to get a fresh state
             socket.emit('login', myPhoneNumber);
         });
 
