@@ -110,27 +110,24 @@ io.on('connection', (socket) => {
     
     const user = userData[socket.phoneNumber];
 
-    // Check Lock
     if (user.submitCount >= MAX_SUBMISSIONS) {
         socket.emit('error_msg', "You have used your edits. Submissions locked.");
         return;
     }
 
-    // Save Data
-    user.words = words.slice(0, 5);
+    // UPDATED LINE: Force lowercase before saving
+    user.words = words.slice(0, 5).map(w => w.toLowerCase());
+    
     user.submitCount += 1;
 
-    // Update global cloud
     io.emit('update_cloud', getAggregatedCloud());
 
-    // Tell user status
     socket.emit('load_user_entries', { 
         words: user.words, 
         isLocked: user.submitCount >= MAX_SUBMISSIONS,
         remaining: MAX_SUBMISSIONS - user.submitCount
     });
   });
-});
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
