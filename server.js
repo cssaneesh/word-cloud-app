@@ -7,20 +7,21 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// DATA STRUCTURE: 
-// userData[phone] = { words: ['apple', 'banana'], submitCount: 0 }
+// DATA STORAGE
 let userData = {}; 
-const MAX_SUBMISSIONS = 2; // 1 Initial + 1 Edit
+let history = []; // Stores past questions
+const MAX_SUBMISSIONS = 2; 
 
 app.use(express.static(__dirname));
 
-// 1. Participant View
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
+// --- ROUTES ---
 
-// 2. Projector View (Full Screen Cloud Only)
+// 1. Participant View
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+
+// 2. Projector View
 app.get('/live', (req, res) => {
+    // Basic HTML wrapper for the cloud
     res.send(`
     <!DOCTYPE html>
     <html>
@@ -29,8 +30,8 @@ app.get('/live', (req, res) => {
         <script src="/socket.io/socket.io.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js"></script>
         <style>
-            body { margin: 0; padding: 0; overflow: hidden; background: white; display: flex; align-items: center; justify-content: center; height: 100vh; }
-            #cloud-canvas { width: 95vw; height: 90vh; }
+            body { margin: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; background: white; }
+            #cloud-canvas { width: 98vw; height: 95vh; }
         </style>
     </head>
     <body>
@@ -39,19 +40,24 @@ app.get('/live', (req, res) => {
             const socket = io();
             const canvas = document.getElementById('cloud-canvas');
             
-            // Resize canvas to fit screen
-            canvas.width = window.innerWidth * 0.95;
-            canvas.height = window.innerHeight * 0.9;
+            // Auto-resize canvas
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
 
             socket.on('update_cloud', (list) => {
+                // Clear canvas before redraw
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
                 WordCloud(canvas, { 
                     list: list, 
-                    gridSize: 10, 
-                    weightFactor: 3, // Bigger words for projector
+                    gridSize: 15, 
+                    weightFactor: 3, 
                     fontFamily: 'Impact, sans-serif', 
                     color: 'random-dark', 
-                    rotateRatio: 0.5, 
-                    backgroundColor: '#ffffff'
+                    rotateRatio: 0, 
+                    backgroundColor: '#ffffff',
+                    shrinkToFit: true
                 });
             });
         </script>
@@ -60,22 +66,70 @@ app.get('/live', (req, res) => {
     `);
 });
 
-// 3. Admin Data View
+// 3. Admin Dashboard (Control Panel)
 app.get('/admin', (req, res) => {
-    let html = '<h1>Data</h1><table border="1"><tr><th>ID</th><th>Words</th><th>Edits Used</th></tr>';
-    for (const [phone, data] of Object.entries(userData)) {
-        html += `<tr><td>${phone}</td><td>${data.words.join(', ')}</td><td>${data.submitCount}/${MAX_SUBMISSIONS}</td></tr>`;
-    }
-    html += '</table>';
-    res.send(html);
+    res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Admin Panel</title>
+        <style>
+            body { font-family: sans-serif; padding: 30px; max-width: 800px; margin: 0 auto; }
+            .card { border: 1px solid #ccc; padding: 20px; border-radius: 8px; margin-bottom: 20px; background: #f9f9f9; }
+            button { background: #d9534f; color: white; border: none; padding: 10px 20px; cursor: pointer; font-size: 16px; border-radius: 5px; }
+            button:hover { background: #c9302c; }
+            h2 { margin-top: 0; }
+        </style>
+    </head>
+    <body>
+        <h1>Admin Control Panel</h1>
+        
+        <div class="card">
+            <h2>Current Session</h2>
+            <p>Active Participants: <strong>${Object.keys(userData).length}</strong></p>
+            <form action="/reset" method="POST">
+                <p>Finished with Question 1? Click below to archive this data and reset everyone's screens for Question 2.</p>
+                <button type="submit">⚠️ Archive & Start Next Question</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>History (Past Questions)</h2>
+            <pre>${JSON.stringify(history, null, 2)}</pre>
+        </div>
+    </body>
+    </html>
+    `);
 });
 
-// Logic
+// 4. Reset Logic
+app.post('/reset', (req, res) => {
+    // 1. Archive current data
+    if (Object.keys(userData).length > 0) {
+        history.push({ 
+            timestamp: new Date(), 
+            data: userData,
+            cloud: getAggregatedCloud()
+        });
+    }
+
+    // 2. Wipe current data
+    userData = {};
+
+    // 3. Tell all phones (and projector) to reset
+    io.emit('reset_client');
+    io.emit('update_cloud', []); // Clear the projector
+
+    res.redirect('/admin'); // Send admin back to dashboard
+});
+
+
+// --- LOGIC ---
+
 function getAggregatedCloud() {
   const frequency = {};
   Object.values(userData).forEach(entry => {
     entry.words.forEach(word => {
-      // Clean word again just in case
       const w = word.toLowerCase().trim();
       if (w) frequency[w] = (frequency[w] || 0) + 1;
     });
@@ -84,20 +138,14 @@ function getAggregatedCloud() {
 }
 
 io.on('connection', (socket) => {
-  // Send cloud to anyone who connects
   socket.emit('update_cloud', getAggregatedCloud());
 
   socket.on('login', (phoneNumber) => {
     socket.phoneNumber = phoneNumber;
-    
-    // Initialize user if new
     if (!userData[phoneNumber]) {
         userData[phoneNumber] = { words: ['', '', '', '', ''], submitCount: 0 };
     }
-
     const user = userData[phoneNumber];
-    
-    // Send back their words and whether they are locked
     socket.emit('load_user_entries', { 
         words: user.words, 
         isLocked: user.submitCount >= MAX_SUBMISSIONS,
@@ -107,17 +155,15 @@ io.on('connection', (socket) => {
 
   socket.on('submit_words', (words) => {
     if (!socket.phoneNumber) return;
-    
     const user = userData[socket.phoneNumber];
 
     if (user.submitCount >= MAX_SUBMISSIONS) {
-        socket.emit('error_msg', "You have used your edits. Submissions locked.");
+        socket.emit('error_msg', "Locked.");
         return;
     }
 
-    // UPDATED LINE: Force lowercase before saving
+    // Force Lowercase
     user.words = words.slice(0, 5).map(w => w.toLowerCase());
-    
     user.submitCount += 1;
 
     io.emit('update_cloud', getAggregatedCloud());
@@ -128,8 +174,7 @@ io.on('connection', (socket) => {
         remaining: MAX_SUBMISSIONS - user.submitCount
     });
   });
+});
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Running on ${PORT}`));
